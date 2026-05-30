@@ -173,11 +173,11 @@ local function makeTabBtn(name, text, posX, par)
 end
 local tabMainBtn = makeTabBtn("tMain","Main",0,tabBar)
 trackFont(tabMainBtn, 9)
-local tabLootBtn = makeTabBtn("tLoot","Loot",0.25,tabBar)
+local tabLootBtn = makeTabBtn("tLoot History","Loot",0.25,tabBar)
 trackFont(tabLootBtn, 9)
-local tabCredBtn = makeTabBtn("tCred","Cred",0.50,tabBar)
+local tabCredBtn = makeTabBtn("tCredits","Cred",0.50,tabBar)
 trackFont(tabCredBtn, 9)
-local tabSettBtn = makeTabBtn("tSett","Sett",0.75,tabBar)
+local tabSettBtn = makeTabBtn("tSettings","Sett",0.75,tabBar)
 trackFont(tabSettBtn, 9)
 tabMainBtn.BackgroundColor3 = Color3.fromRGB(50,50,80)
 tabMainBtn.TextColor3 = Color3.new(1,1,1)
@@ -389,6 +389,11 @@ task.spawn(function()
 end)
 
 print([[
+
+
+
+
+
               d8, d8b  d8b                                                                           ,d8888b   
              `8P  88P  ?88                                                d8P                        88P'      
                  d88    88b                                            d888888P                   d888888P     
