@@ -1,0 +1,952 @@
+--[[
+    ================================================
+       WilkY's Auto UFO v1.1
+       Slime RNG UFO Auto-TP + Return Zone
+       Loadstring ready + Resizable + Fully draggable
+    ================================================
+    
+    LOADSTRING:
+    loadstring(game:HttpGet("YOUR_RAW_URL_HERE"))()
+    
+    Upload this to GitHub raw / Pastebin raw, then
+    paste the URL above in your executor.
+    
+    CONTROLS:
+    - Drag anywhere on the panel to move it
+    - Drag bottom-right corner handle to resize
+    - Minimize with the - button (top-right)
+    - Settings tab for size presets + custom resize
+    ================================================
+]]
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local UserInputService = game:GetService("UserInputService")
+
+local player = Players.LocalPlayer
+local UfoEventServiceClient = require(ReplicatedStorage.Source.Features.UfoEvent.UfoEventServiceClient)
+local Zones = require(ReplicatedStorage.Source.Game.Items.Zones)
+
+local stateSource = UfoEventServiceClient:getStateSource()
+local isAutoTPEnabled = true
+local lastTeleportedZoneId = nil
+local savedReturnZoneId = nil
+local wasIdle = true
+
+local function getHRP()
+    local char = player.Character
+    if not char then char = player.CharacterAdded:Wait() end
+    if char then return char:WaitForChild("HumanoidRootPart", 8) end
+    return nil
+end
+
+local function getZoneTP(zoneId)
+    if not zoneId then return nil end
+    local folder = workspace.Zones:FindFirstChild(tostring(zoneId))
+    if not folder then return nil end
+    local poi = folder:FindFirstChild("POI")
+    if not poi then return nil end
+    local hitbox = poi:FindFirstChild("Hitbox")
+    if hitbox then return hitbox.Position + Vector3.new(0, 8, 0) end
+    local bp = poi:FindFirstChild("Baseplate")
+    if bp then return bp.Position + Vector3.new(0, 8, 0) end
+    return nil
+end
+
+local function doTeleport(pos)
+    local hrp = getHRP()
+    if not hrp then return false end
+    local hum = player.Character:FindFirstChildWhichIsA("Humanoid")
+    if not hum or hum.Health <= 0 then return false end
+    return pcall(function() hrp.CFrame = CFrame.new(pos) end)
+end
+
+local function getPlayerZoneId()
+    local char = player.Character
+    if not char then return nil end
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return nil end
+    local pp = hrp.Position
+    for _, zf in pairs(workspace.Zones:GetChildren()) do
+        if zf:IsA("Model") or zf:IsA("Folder") then
+            local poi = zf:FindFirstChild("POI")
+            if poi then
+                local hb = poi:FindFirstChild("Hitbox")
+                if hb and (pp - hb.Position).Magnitude < 100 then
+                    return tonumber(zf.Name)
+                end
+            end
+        end
+    end
+    return nil
+end
+
+-- ===== GUI =====
+
+if player.PlayerGui:FindFirstChild("WilkYsAutoUFO") then
+    player.PlayerGui:FindFirstChild("WilkYsAutoUFO"):Destroy()
+end
+
+local gui = Instance.new("ScreenGui")
+gui.Name = "WilkYsAutoUFO"
+gui.ResetOnSpawn = false
+gui.Parent = player.PlayerGui
+
+local panel = Instance.new("Frame")
+panel.Size = UDim2.new(0, 270, 0, 220)
+panel.Position = UDim2.new(0, 12, 0.5, -110)
+panel.BackgroundColor3 = Color3.fromRGB(18, 18, 28)
+panel.BorderSizePixel = 0
+panel.Active = true
+panel.ClipsDescendants = true
+panel.Parent = gui
+Instance.new("UICorner", panel).CornerRadius = UDim.new(0, 10)
+
+local accent = Instance.new("Frame")
+accent.Size = UDim2.new(1, 0, 0, 3)
+accent.BackgroundColor3 = Color3.fromRGB(255, 200, 50)
+accent.BorderSizePixel = 0
+accent.Parent = panel
+Instance.new("UICorner", accent).CornerRadius = UDim.new(0, 2)
+
+local topBar = Instance.new("Frame")
+topBar.Size = UDim2.new(1, 0, 0, 30)
+topBar.BackgroundColor3 = Color3.fromRGB(28, 28, 42)
+topBar.BorderSizePixel = 0
+topBar.ZIndex = 30
+topBar.Parent = panel
+
+local titleLbl = Instance.new("TextLabel")
+titleLbl.Size = UDim2.new(1, -60, 1, 0)
+titleLbl.Position = UDim2.new(0, 8, 0, 0)
+titleLbl.BackgroundTransparency = 1
+titleLbl.Text = "WilkY's  Auto  UFO"
+titleLbl.TextColor3 = Color3.fromRGB(255, 210, 60)
+titleLbl.TextSize = 13
+titleLbl.Font = Enum.Font.GothamBold
+titleLbl.TextXAlignment = Enum.TextXAlignment.Left
+titleLbl.ZIndex = 31
+titleLbl.Parent = topBar
+
+local settingsBtn = Instance.new("TextButton")
+settingsBtn.Size = UDim2.new(0, 22, 0, 22)
+settingsBtn.Position = UDim2.new(1, -52, 0, 4)
+settingsBtn.BackgroundColor3 = Color3.fromRGB(40, 40, 60)
+settingsBtn.Text = "S"
+settingsBtn.TextColor3 = Color3.fromRGB(200, 200, 220)
+settingsBtn.TextSize = 11
+settingsBtn.Font = Enum.Font.GothamBold
+settingsBtn.BorderSizePixel = 0
+settingsBtn.ZIndex = 32
+settingsBtn.Parent = topBar
+Instance.new("UICorner", settingsBtn).CornerRadius = UDim.new(0, 4)
+
+local minBtn = Instance.new("TextButton")
+minBtn.Size = UDim2.new(0, 22, 0, 22)
+minBtn.Position = UDim2.new(1, -28, 0, 4)
+minBtn.BackgroundColor3 = Color3.fromRGB(60, 40, 40)
+minBtn.Text = "-"
+minBtn.TextColor3 = Color3.fromRGB(255, 150, 150)
+minBtn.TextSize = 14
+minBtn.Font = Enum.Font.GothamBold
+minBtn.BorderSizePixel = 0
+minBtn.ZIndex = 32
+minBtn.Parent = topBar
+Instance.new("UICorner", minBtn).CornerRadius = UDim.new(0, 4)
+
+local tabBar = Instance.new("Frame")
+tabBar.Size = UDim2.new(1, -8, 0, 24)
+tabBar.Position = UDim2.new(0, 4, 0, 34)
+tabBar.BackgroundTransparency = 1
+tabBar.ZIndex = 25
+tabBar.Parent = panel
+
+local tabMainBtn = Instance.new("TextButton")
+tabMainBtn.Size = UDim2.new(0.5, -2, 1, 0)
+tabMainBtn.BackgroundColor3 = Color3.fromRGB(50, 50, 80)
+tabMainBtn.Text = "Main"
+tabMainBtn.TextColor3 = Color3.new(1, 1, 1)
+tabMainBtn.TextSize = 11
+tabMainBtn.Font = Enum.Font.GothamBold
+tabMainBtn.BorderSizePixel = 0
+tabMainBtn.ZIndex = 26
+tabMainBtn.Parent = tabBar
+Instance.new("UICorner", tabMainBtn).CornerRadius = UDim.new(0, 5)
+
+local tabCredBtn = Instance.new("TextButton")
+tabCredBtn.Size = UDim2.new(0.5, -2, 1, 0)
+tabCredBtn.Position = UDim2.new(0.5, 2, 0, 0)
+tabCredBtn.BackgroundColor3 = Color3.fromRGB(30, 30, 50)
+tabCredBtn.Text = "Credits"
+tabCredBtn.TextColor3 = Color3.fromRGB(160, 160, 200)
+tabCredBtn.TextSize = 10
+tabCredBtn.Font = Enum.Font.GothamBold
+tabCredBtn.BorderSizePixel = 0
+tabCredBtn.ZIndex = 26
+tabCredBtn.Parent = tabBar
+Instance.new("UICorner", tabCredBtn).CornerRadius = UDim.new(0, 5)
+
+local contentArea = Instance.new("Frame")
+contentArea.Size = UDim2.new(1, -8, 1, -66)
+contentArea.Position = UDim2.new(0, 4, 0, 62)
+contentArea.BackgroundTransparency = 1
+contentArea.ClipsDescendants = true
+contentArea.ZIndex = 10
+contentArea.Parent = panel
+
+local mainTab = Instance.new("Frame")
+mainTab.Size = UDim2.new(1, 0, 1, -28)
+mainTab.BackgroundTransparency = 1
+mainTab.Parent = contentArea
+
+local status = Instance.new("TextLabel")
+status.Size = UDim2.new(1, -4, 0, 22)
+status.Position = UDim2.new(0, 2, 0, 0)
+status.BackgroundTransparency = 1
+status.Text = "Starting..."
+status.TextColor3 = Color3.fromRGB(180, 180, 180)
+status.TextSize = 11
+status.Font = Enum.Font.Gotham
+status.TextXAlignment = Enum.TextXAlignment.Left
+status.TextWrapped = true
+status.Parent = mainTab
+
+local zoneInfo = Instance.new("TextLabel")
+zoneInfo.Size = UDim2.new(1, -4, 0, 16)
+zoneInfo.Position = UDim2.new(0, 2, 0, 22)
+zoneInfo.BackgroundTransparency = 1
+zoneInfo.Text = "Current zone: -"
+zoneInfo.TextColor3 = Color3.fromRGB(140, 140, 170)
+zoneInfo.TextSize = 10
+zoneInfo.Font = Enum.Font.GothamMedium
+zoneInfo.TextXAlignment = Enum.TextXAlignment.Left
+zoneInfo.Parent = mainTab
+
+local returnInfo = Instance.new("TextLabel")
+returnInfo.Size = UDim2.new(1, -4, 0, 16)
+returnInfo.Position = UDim2.new(0, 2, 0, 38)
+returnInfo.BackgroundTransparency = 1
+returnInfo.Text = "Return zone: none"
+returnInfo.TextColor3 = Color3.fromRGB(140, 170, 140)
+returnInfo.TextSize = 10
+returnInfo.Font = Enum.Font.GothamMedium
+returnInfo.TextXAlignment = Enum.TextXAlignment.Left
+returnInfo.Parent = mainTab
+
+local tpBtn = Instance.new("TextButton")
+tpBtn.Size = UDim2.new(0.48, -2, 0, 24)
+tpBtn.Position = UDim2.new(0, 2, 0, 60)
+tpBtn.BackgroundColor3 = Color3.fromRGB(0, 170, 0)
+tpBtn.Text = "AUTO-TP: ON"
+tpBtn.TextColor3 = Color3.new(1, 1, 1)
+tpBtn.TextSize = 11
+tpBtn.Font = Enum.Font.GothamBold
+tpBtn.BorderSizePixel = 0
+tpBtn.ZIndex = 15
+tpBtn.Parent = mainTab
+Instance.new("UICorner", tpBtn).CornerRadius = UDim.new(0, 5)
+
+local setReturnBtn = Instance.new("TextButton")
+setReturnBtn.Size = UDim2.new(0.48, -2, 0, 24)
+setReturnBtn.Position = UDim2.new(0.52, 2, 0, 60)
+setReturnBtn.BackgroundColor3 = Color3.fromRGB(30, 60, 140)
+setReturnBtn.Text = "SET RETURN ZONE"
+setReturnBtn.TextColor3 = Color3.fromRGB(180, 200, 255)
+setReturnBtn.TextSize = 9
+setReturnBtn.Font = Enum.Font.GothamBold
+setReturnBtn.BorderSizePixel = 0
+setReturnBtn.ZIndex = 15
+setReturnBtn.Parent = mainTab
+Instance.new("UICorner", setReturnBtn).CornerRadius = UDim.new(0, 5)
+
+local returnNowBtn = Instance.new("TextButton")
+returnNowBtn.Size = UDim2.new(1, -4, 0, 24)
+returnNowBtn.Position = UDim2.new(0, 2, 0, 90)
+returnNowBtn.BackgroundColor3 = Color3.fromRGB(80, 40, 120)
+returnNowBtn.Text = "RETURN TO ZONE NOW"
+returnNowBtn.TextColor3 = Color3.fromRGB(220, 180, 255)
+returnNowBtn.TextSize = 11
+returnNowBtn.Font = Enum.Font.GothamBold
+returnNowBtn.BorderSizePixel = 0
+returnNowBtn.ZIndex = 15
+returnNowBtn.Parent = mainTab
+Instance.new("UICorner", returnNowBtn).CornerRadius = UDim.new(0, 5)
+
+local verLbl = Instance.new("TextLabel")
+verLbl.Size = UDim2.new(1, 0, 0, 14)
+verLbl.Position = UDim2.new(0, 0, 1, -16)
+verLbl.BackgroundTransparency = 1
+verLbl.Text = "v1.1"
+verLbl.TextColor3 = Color3.fromRGB(60, 60, 80)
+verLbl.TextSize = 9
+verLbl.Font = Enum.Font.Gotham
+verLbl.TextXAlignment = Enum.TextXAlignment.Right
+verLbl.ZIndex = 5
+verLbl.Parent = mainTab
+
+local credTab = Instance.new("Frame")
+credTab.Size = UDim2.new(1, 0, 1, -28)
+credTab.BackgroundTransparency = 1
+credTab.Visible = false
+credTab.Parent = contentArea
+
+local scroll = Instance.new("ScrollingFrame")
+scroll.Size = UDim2.new(1, 4, 1, 0)
+scroll.BackgroundTransparency = 1
+scroll.BorderSizePixel = 0
+scroll.ScrollBarThickness = 3
+scroll.ScrollBarImageColor3 = Color3.fromRGB(70, 70, 110)
+scroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+scroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+scroll.Parent = credTab
+
+local listLay = Instance.new("UIListLayout")
+listLay.SortOrder = Enum.SortOrder.LayoutOrder
+listLay.Padding = UDim.new(0, 1)
+listLay.Parent = scroll
+
+local function addSep(o)
+    local s = Instance.new("Frame")
+    s.Size = UDim2.new(1, 0, 0, 6)
+    s.BackgroundTransparency = 1
+    s.LayoutOrder = o
+    s.Parent = scroll
+end
+
+local function addHdr(txt, o)
+    local sec = Instance.new("Frame")
+    sec.Size = UDim2.new(1, 0, 0, 20)
+    sec.BackgroundColor3 = Color3.fromRGB(35, 35, 55)
+    sec.BorderSizePixel = 0
+    sec.LayoutOrder = o
+    sec.Parent = scroll
+    Instance.new("UICorner", sec).CornerRadius = UDim.new(0, 4)
+    local l = Instance.new("TextLabel")
+    l.Size = UDim2.new(1, -8, 1, 0)
+    l.Position = UDim2.new(0, 4, 0, 0)
+    l.BackgroundTransparency = 1
+    l.Text = txt
+    l.TextColor3 = Color3.fromRGB(255, 255, 150)
+    l.TextSize = 11
+    l.Font = Enum.Font.GothamBold
+    l.TextXAlignment = Enum.TextXAlignment.Left
+    l.Parent = sec
+end
+
+local function addLn(txt, o, c)
+    local l = Instance.new("TextLabel")
+    l.Size = UDim2.new(1, -8, 0, 15)
+    l.BackgroundTransparency = 1
+    l.LayoutOrder = o
+    l.Text = txt
+    l.TextColor3 = c or Color3.fromRGB(180, 180, 180)
+    l.TextSize = 10
+    l.Font = Enum.Font.Gotham
+    l.TextXAlignment = Enum.TextXAlignment.Left
+    l.TextWrapped = true
+    l.Parent = scroll
+end
+
+local idx = 1
+addHdr("SCRIPT INFO", idx); idx = idx + 1
+addLn("Name: WilkY's Auto UFO", idx, Color3.fromRGB(200, 200, 255)); idx = idx + 1
+addLn("Version: v1.1", idx, Color3.fromRGB(200, 200, 255)); idx = idx + 1
+addLn("Game: Slime RNG", idx, Color3.fromRGB(200, 200, 255)); idx = idx + 1
+addSep(idx); idx = idx + 1
+addHdr("FEATURES", idx); idx = idx + 1
+addLn("Auto-TP to UFO event zones", idx, Color3.fromRGB(180, 220, 180)); idx = idx + 1
+addLn("Per-zone tracking (re-TP on change)", idx, Color3.fromRGB(180, 220, 180)); idx = idx + 1
+addLn("Auto-save return zone on event", idx, Color3.fromRGB(180, 220, 180)); idx = idx + 1
+addLn("Auto-return after event (3s delay)", idx, Color3.fromRGB(180, 220, 180)); idx = idx + 1
+addLn("Manual return zone + instant return", idx, Color3.fromRGB(180, 220, 180)); idx = idx + 1
+addLn("Drag anywhere to move panel", idx, Color3.fromRGB(180, 220, 180)); idx = idx + 1
+addLn("Drag corner handle to resize", idx, Color3.fromRGB(180, 220, 180)); idx = idx + 1
+addLn("Minimize / maximize toggle", idx, Color3.fromRGB(180, 220, 180)); idx = idx + 1
+addLn("One-line loadstring support", idx, Color3.fromRGB(180, 220, 180)); idx = idx + 1
+addSep(idx); idx = idx + 1
+addHdr("HOW IT WORKS", idx); idx = idx + 1
+addLn("1. Toggle AUTO-TP ON", idx, Color3.fromRGB(160, 180, 200)); idx = idx + 1
+addLn("2. When UFO starts, current zone saved", idx, Color3.fromRGB(160, 180, 200)); idx = idx + 1
+addLn("3. TP's to each new UFO zone", idx, Color3.fromRGB(160, 180, 200)); idx = idx + 1
+addLn("4. After event, auto-returns in 3s", idx, Color3.fromRGB(160, 180, 200)); idx = idx + 1
+addLn("5. SET RETURN ZONE = manual override", idx, Color3.fromRGB(160, 180, 200)); idx = idx + 1
+addLn("6. Drag bottom-right corner to resize", idx, Color3.fromRGB(160, 180, 200)); idx = idx + 1
+addSep(idx); idx = idx + 1
+addHdr("LOADSTRING USAGE", idx); idx = idx + 1
+addLn("Upload this script to GitHub raw,", idx, Color3.fromRGB(160, 200, 160)); idx = idx + 1
+addLn("Pastebin raw, or any raw host.", idx, Color3.fromRGB(160, 200, 160)); idx = idx + 1
+addLn("Then execute in your executor:", idx, Color3.fromRGB(160, 200, 160)); idx = idx + 1
+addLn('loadstring(game:HttpGet("URL"))()', idx, Color3.fromRGB(255, 220, 120)); idx = idx + 1
+addSep(idx); idx = idx + 1
+addHdr("CREDITS", idx); idx = idx + 1
+addLn("Scripted by: WilkY", idx, Color3.fromRGB(255, 200, 100)); idx = idx + 1
+addLn("Built with: OWL / IYAI", idx, Color3.fromRGB(160, 160, 200)); idx = idx + 1
+addSep(idx); idx = idx + 1
+addHdr("CHANGELOG", idx); idx = idx + 1
+addLn("v1.1 -- Resizable + fully draggable", idx, Color3.fromRGB(200, 180, 140)); idx = idx + 1
+addLn("  + Full panel drag (not just top)", idx, Color3.fromRGB(150, 150, 150)); idx = idx + 1
+addLn("  + Resize handle (bottom-right)", idx, Color3.fromRGB(150, 150, 150)); idx = idx + 1
+addLn("  + Minimize / maximize button", idx, Color3.fromRGB(150, 150, 150)); idx = idx + 1
+addLn("  + Settings tab for size presets", idx, Color3.fromRGB(150, 150, 150)); idx = idx + 1
+addLn("  + Loadstring-ready structure", idx, Color3.fromRGB(150, 150, 150)); idx = idx + 1
+addLn("v1.0 -- Initial release", idx, Color3.fromRGB(150, 150, 150)); idx = idx + 1
+
+local settingsTab = Instance.new("Frame")
+settingsTab.Size = UDim2.new(1, 0, 1, -28)
+settingsTab.BackgroundTransparency = 1
+settingsTab.Visible = false
+settingsTab.Parent = contentArea
+
+local setScroll = Instance.new("ScrollingFrame")
+setScroll.Size = UDim2.new(1, 4, 1, 0)
+setScroll.BackgroundTransparency = 1
+setScroll.BorderSizePixel = 0
+setScroll.ScrollBarThickness = 3
+setScroll.ScrollBarImageColor3 = Color3.fromRGB(70, 70, 110)
+setScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+setScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+setScroll.Parent = settingsTab
+
+local setLay = Instance.new("UIListLayout")
+setLay.SortOrder = Enum.SortOrder.LayoutOrder
+setLay.Padding = UDim.new(0, 2)
+setLay.Parent = setScroll
+
+local function addSetSep(o)
+    local s = Instance.new("Frame")
+    s.Size = UDim2.new(1, 0, 0, 6)
+    s.BackgroundTransparency = 1
+    s.LayoutOrder = o
+    s.Parent = setScroll
+end
+
+local function addSetHdr(txt, o)
+    local sec = Instance.new("Frame")
+    sec.Size = UDim2.new(1, 0, 0, 20)
+    sec.BackgroundColor3 = Color3.fromRGB(40, 35, 55)
+    sec.BorderSizePixel = 0
+    sec.LayoutOrder = o
+    sec.Parent = setScroll
+    Instance.new("UICorner", sec).CornerRadius = UDim.new(0, 4)
+    local l = Instance.new("TextLabel")
+    l.Size = UDim2.new(1, -8, 1, 0)
+    l.Position = UDim2.new(0, 4, 0, 0)
+    l.BackgroundTransparency = 1
+    l.Text = txt
+    l.TextColor3 = Color3.fromRGB(255, 200, 100)
+    l.TextSize = 11
+    l.Font = Enum.Font.GothamBold
+    l.TextXAlignment = Enum.TextXAlignment.Left
+    l.Parent = sec
+end
+
+local function addSetBtn(label, o, callback)
+    local row = Instance.new("Frame")
+    row.Size = UDim2.new(1, 0, 0, 26)
+    row.BackgroundTransparency = 1
+    row.LayoutOrder = o
+    row.Parent = setScroll
+    local l = Instance.new("TextLabel")
+    l.Size = UDim2.new(0.55, -4, 1, 0)
+    l.Position = UDim2.new(0, 6, 0, 0)
+    l.BackgroundTransparency = 1
+    l.Text = label
+    l.TextColor3 = Color3.fromRGB(180, 180, 200)
+    l.TextSize = 10
+    l.Font = Enum.Font.Gotham
+    l.TextXAlignment = Enum.TextXAlignment.Left
+    l.Parent = row
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(0.35, -4, 0, 20)
+    btn.Position = UDim2.new(0.6, 2, 0, 3)
+    btn.BackgroundColor3 = Color3.fromRGB(40, 50, 80)
+    btn.Text = "Apply"
+    btn.TextColor3 = Color3.fromRGB(180, 200, 255)
+    btn.TextSize = 9
+    btn.Font = Enum.Font.GothamBold
+    btn.BorderSizePixel = 0
+    btn.ZIndex = 15
+    btn.Parent = row
+    Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 4)
+    btn.MouseButton1Click:Connect(callback)
+    return row
+end
+
+local si = 1
+addSetHdr("SIZE PRESETS", si); si = si + 1
+
+local sizeLabel = Instance.new("TextLabel")
+sizeLabel.Size = UDim2.new(1, -8, 0, 16)
+sizeLabel.BackgroundTransparency = 1
+sizeLabel.LayoutOrder = si
+sizeLabel.Text = "Current: 270 x 220"
+sizeLabel.TextColor3 = Color3.fromRGB(140, 140, 170)
+sizeLabel.TextSize = 10
+sizeLabel.Font = Enum.Font.Gotham
+sizeLabel.TextXAlignment = Enum.TextXAlignment.Left
+sizeLabel.Parent = setScroll
+si = si + 1
+
+local presets = {
+    {label = "Small  (200 x 160)", w = 200, h = 160},
+    {label = "Medium (270 x 220)", w = 270, h = 220},
+    {label = "Large  (340 x 280)", w = 340, h = 280},
+    {label = "XL     (400 x 340)", w = 400, h = 340},
+}
+for _, p in ipairs(presets) do
+    addSetBtn(p.label, si, function()
+        panel.Size = UDim2.new(0, p.w, 0, p.h)
+        sizeLabel.Text = "Current: " .. p.w .. " x " .. p.h
+    end)
+    si = si + 1
+end
+
+addSetSep(si); si = si + 1
+addSetHdr("CUSTOM RESIZE (+/- 10 per click)", si); si = si + 1
+
+local wRow = Instance.new("Frame")
+wRow.Size = UDim2.new(1, 0, 0, 26)
+wRow.BackgroundTransparency = 1
+wRow.LayoutOrder = si
+wRow.Parent = setScroll
+local wLabel = Instance.new("TextLabel")
+wLabel.Size = UDim2.new(0.4, -4, 1, 0)
+wLabel.Position = UDim2.new(0, 6, 0, 0)
+wLabel.BackgroundTransparency = 1
+wLabel.Text = "Width: 270"
+wLabel.TextColor3 = Color3.fromRGB(180, 180, 200)
+wLabel.TextSize = 10
+wLabel.Font = Enum.Font.Gotham
+wLabel.TextXAlignment = Enum.TextXAlignment.Left
+wLabel.Parent = wRow
+local wMinus = Instance.new("TextButton")
+wMinus.Size = UDim2.new(0, 22, 0, 20)
+wMinus.Position = UDim2.new(0.45, 2, 0, 3)
+wMinus.BackgroundColor3 = Color3.fromRGB(60, 30, 30)
+wMinus.Text = "-"
+wMinus.TextColor3 = Color3.fromRGB(255, 150, 150)
+wMinus.TextSize = 12
+wMinus.Font = Enum.Font.GothamBold
+wMinus.BorderSizePixel = 0
+wMinus.ZIndex = 15
+wMinus.Parent = wRow
+Instance.new("UICorner", wMinus).CornerRadius = UDim.new(0, 4)
+local wPlus = Instance.new("TextButton")
+wPlus.Size = UDim2.new(0, 22, 0, 20)
+wPlus.Position = UDim2.new(0.45, 28, 0, 3)
+wPlus.BackgroundColor3 = Color3.fromRGB(30, 60, 30)
+wPlus.Text = "+"
+wPlus.TextColor3 = Color3.fromRGB(150, 255, 150)
+wPlus.TextSize = 12
+wPlus.Font = Enum.Font.GothamBold
+wPlus.BorderSizePixel = 0
+wPlus.ZIndex = 15
+wPlus.Parent = wRow
+Instance.new("UICorner", wPlus).CornerRadius = UDim.new(0, 4)
+si = si + 1
+
+local hRow = Instance.new("Frame")
+hRow.Size = UDim2.new(1, 0, 0, 26)
+hRow.BackgroundTransparency = 1
+hRow.LayoutOrder = si
+hRow.Parent = setScroll
+local hLabel = Instance.new("TextLabel")
+hLabel.Size = UDim2.new(0.4, -4, 1, 0)
+hLabel.Position = UDim2.new(0, 6, 0, 0)
+hLabel.BackgroundTransparency = 1
+hLabel.Text = "Height: 220"
+hLabel.TextColor3 = Color3.fromRGB(180, 180, 200)
+hLabel.TextSize = 10
+hLabel.Font = Enum.Font.Gotham
+hLabel.TextXAlignment = Enum.TextXAlignment.Left
+hLabel.Parent = hRow
+local hMinus = Instance.new("TextButton")
+hMinus.Size = UDim2.new(0, 22, 0, 20)
+hMinus.Position = UDim2.new(0.45, 2, 0, 3)
+hMinus.BackgroundColor3 = Color3.fromRGB(60, 30, 30)
+hMinus.Text = "-"
+hMinus.TextColor3 = Color3.fromRGB(255, 150, 150)
+hMinus.TextSize = 12
+hMinus.Font = Enum.Font.GothamBold
+hMinus.BorderSizePixel = 0
+hMinus.ZIndex = 15
+hMinus.Parent = hRow
+Instance.new("UICorner", hMinus).CornerRadius = UDim.new(0, 4)
+local hPlus = Instance.new("TextButton")
+hPlus.Size = UDim2.new(0, 22, 0, 20)
+hPlus.Position = UDim2.new(0.45, 28, 0, 3)
+hPlus.BackgroundColor3 = Color3.fromRGB(30, 60, 30)
+hPlus.Text = "+"
+hPlus.TextColor3 = Color3.fromRGB(150, 255, 150)
+hPlus.TextSize = 12
+hPlus.Font = Enum.Font.GothamBold
+hPlus.BorderSizePixel = 0
+hPlus.ZIndex = 15
+hPlus.Parent = hRow
+Instance.new("UICorner", hPlus).CornerRadius = UDim.new(0, 4)
+si = si + 1
+
+wMinus.MouseButton1Click:Connect(function()
+    local w = math.max(180, panel.Size.X.Offset - 10)
+    local h = panel.Size.Y.Offset
+    panel.Size = UDim2.new(0, w, 0, h)
+    wLabel.Text = "Width: " .. w
+    sizeLabel.Text = "Current: " .. w .. " x " .. h
+end)
+wPlus.MouseButton1Click:Connect(function()
+    local w = math.min(600, panel.Size.X.Offset + 10)
+    local h = panel.Size.Y.Offset
+    panel.Size = UDim2.new(0, w, 0, h)
+    wLabel.Text = "Width: " .. w
+    sizeLabel.Text = "Current: " .. w .. " x " .. h
+end)
+hMinus.MouseButton1Click:Connect(function()
+    local w = panel.Size.X.Offset
+    local h = math.max(150, panel.Size.Y.Offset - 10)
+    panel.Size = UDim2.new(0, w, 0, h)
+    hLabel.Text = "Height: " .. h
+    sizeLabel.Text = "Current: " .. w .. " x " .. h
+end)
+hPlus.MouseButton1Click:Connect(function()
+    local w = panel.Size.X.Offset
+    local h = math.min(600, panel.Size.Y.Offset + 10)
+    panel.Size = UDim2.new(0, w, 0, h)
+    hLabel.Text = "Height: " .. h
+    sizeLabel.Text = "Current: " .. w .. " x " .. h
+end)
+
+addSetSep(si); si = si + 1
+
+local closeSetBtn = Instance.new("TextButton")
+closeSetBtn.Size = UDim2.new(1, -8, 0, 24)
+closeSetBtn.BackgroundColor3 = Color3.fromRGB(60, 30, 30)
+closeSetBtn.Text = "Close Settings"
+closeSetBtn.TextColor3 = Color3.fromRGB(255, 180, 180)
+closeSetBtn.TextSize = 10
+closeSetBtn.Font = Enum.Font.GothamBold
+closeSetBtn.BorderSizePixel = 0
+closeSetBtn.ZIndex = 15
+closeSetBtn.LayoutOrder = si
+closeSetBtn.Parent = setScroll
+Instance.new("UICorner", closeSetBtn).CornerRadius = UDim.new(0, 5)
+
+-- ===== TAB SWITCHING =====
+local currentTab = "main"
+
+local function switchTab(t)
+    currentTab = t
+    mainTab.Visible = false
+    credTab.Visible = false
+    settingsTab.Visible = false
+    tabMainBtn.BackgroundColor3 = Color3.fromRGB(30, 30, 50)
+    tabMainBtn.TextColor3 = Color3.fromRGB(160, 160, 200)
+    tabCredBtn.BackgroundColor3 = Color3.fromRGB(30, 30, 50)
+    tabCredBtn.TextColor3 = Color3.fromRGB(160, 160, 200)
+    if t == "main" then
+        mainTab.Visible = true
+        tabMainBtn.BackgroundColor3 = Color3.fromRGB(50, 50, 80)
+        tabMainBtn.TextColor3 = Color3.new(1, 1, 1)
+    elseif t == "credits" then
+        credTab.Visible = true
+        tabCredBtn.BackgroundColor3 = Color3.fromRGB(50, 50, 80)
+        tabCredBtn.TextColor3 = Color3.new(1, 1, 1)
+    elseif t == "settings" then
+        settingsTab.Visible = true
+        tabMainBtn.BackgroundColor3 = Color3.fromRGB(50, 50, 60)
+        tabMainBtn.TextColor3 = Color3.fromRGB(255, 200, 100)
+    end
+end
+
+tabMainBtn.MouseButton1Click:Connect(function()
+    if currentTab == "settings" then switchTab("main")
+    elseif currentTab == "main" then switchTab("credits")
+    else switchTab("main") end
+end)
+
+tabCredBtn.MouseButton1Click:Connect(function()
+    if currentTab == "settings" then switchTab("credits")
+    else switchTab("settings") end
+end)
+
+settingsBtn.MouseButton1Click:Connect(function()
+    if currentTab == "settings" then switchTab("main") else switchTab("settings") end
+end)
+
+closeSetBtn.MouseButton1Click:Connect(function() switchTab("main") end)
+
+-- ===== MINIMIZE =====
+local minimized = false
+local savedSize = panel.Size
+minBtn.MouseButton1Click:Connect(function()
+    minimized = not minimized
+    if minimized then
+        savedSize = panel.Size
+        panel.Size = UDim2.new(0, 270, 0, 33)
+        minBtn.Text = "+"
+        contentArea.Visible = false
+        tabBar.Visible = false
+    else
+        panel.Size = savedSize
+        minBtn.Text = "-"
+        contentArea.Visible = true
+        tabBar.Visible = true
+    end
+end)
+
+-- ===== RESIZE HANDLE =====
+local resizer = Instance.new("TextButton")
+resizer.Size = UDim2.new(0, 16, 0, 16)
+resizer.Position = UDim2.new(1, -18, 1, -18)
+resizer.BackgroundColor3 = Color3.fromRGB(60, 60, 90)
+resizer.Text = ""
+resizer.BorderSizePixel = 0
+resizer.ZIndex = 50
+resizer.Parent = panel
+Instance.new("UICorner", resizer).CornerRadius = UDim.new(0, 4)
+
+local resizing, resizeStart, startSize
+resizer.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        resizing = true
+        resizeStart = input.Position
+        startSize = panel.Size
+    end
+end)
+UserInputService.InputChanged:Connect(function(input)
+    if resizing and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+        local delta = input.Position - resizeStart
+        local nw = math.clamp(startSize.X.Offset + delta.X, 180, 600)
+        local nh = math.clamp(startSize.Y.Offset + delta.Y, 150, 600)
+        panel.Size = UDim2.new(0, nw, 0, nh)
+        wLabel.Text = "Width: " .. nw
+        hLabel.Text = "Height: " .. nh
+        sizeLabel.Text = "Current: " .. nw .. " x " .. nh
+    end
+end)
+UserInputService.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        resizing = false
+    end
+end)
+
+-- ===== FULL PANEL DRAG =====
+-- Strategy: topBar (ZIndex 30) is always draggable.
+-- panel background (ZIndex 1) is draggable but buttons (ZIndex 15+) consume their own clicks.
+-- Since child InputBegan fires BEFORE parent, buttons block the panel drag automatically.
+
+local dragging, dragStartPos, startPanelPos
+
+topBar.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        if not resizing then
+            dragging = true
+            dragStartPos = input.Position
+            startPanelPos = panel.Position
+        end
+    end
+end)
+
+panel.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        if not resizing then
+            dragging = true
+            dragStartPos = input.Position
+            startPanelPos = panel.Position
+        end
+    end
+end)
+
+contentArea.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        if not resizing then
+            dragging = true
+            dragStartPos = input.Position
+            startPanelPos = panel.Position
+        end
+    end
+end)
+
+UserInputService.InputChanged:Connect(function(input)
+    if dragging and not resizing and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+        local delta = input.Position - dragStartPos
+        panel.Position = UDim2.new(
+            startPanelPos.X.Scale, startPanelPos.X.Offset + delta.X,
+            startPanelPos.Y.Scale, startPanelPos.Y.Offset + delta.Y
+        )
+    end
+end)
+
+UserInputService.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        dragging = false
+    end
+end)
+
+-- ===== BUTTON LOGIC =====
+
+tpBtn.MouseButton1Click:Connect(function()
+    isAutoTPEnabled = not isAutoTPEnabled
+    if isAutoTPEnabled then
+        tpBtn.BackgroundColor3 = Color3.fromRGB(0, 170, 0)
+        tpBtn.Text = "AUTO-TP: ON"
+    else
+        tpBtn.BackgroundColor3 = Color3.fromRGB(180, 0, 0)
+        tpBtn.Text = "AUTO-TP: OFF"
+    end
+end)
+
+setReturnBtn.MouseButton1Click:Connect(function()
+    local cz = getPlayerZoneId()
+    if cz then
+        savedReturnZoneId = cz
+        local zn = "?"
+        pcall(function() if Zones.hasZone(cz) then zn = Zones.getZone(cz).name end end)
+        setReturnBtn.Text = "ZONE SET"
+        setReturnBtn.BackgroundColor3 = Color3.fromRGB(0, 120, 0)
+        status.Text = "Return zone saved: " .. zn
+        task.delay(1.5, function()
+            setReturnBtn.Text = "SET RETURN ZONE"
+            setReturnBtn.BackgroundColor3 = Color3.fromRGB(30, 60, 140)
+        end)
+    else
+        setReturnBtn.Text = "NO ZONE"
+        setReturnBtn.BackgroundColor3 = Color3.fromRGB(140, 30, 30)
+        status.Text = "Could not detect current zone."
+        task.delay(1.5, function()
+            setReturnBtn.Text = "SET RETURN ZONE"
+            setReturnBtn.BackgroundColor3 = Color3.fromRGB(30, 60, 140)
+        end)
+    end
+end)
+
+returnNowBtn.MouseButton1Click:Connect(function()
+    if not savedReturnZoneId then
+        returnNowBtn.Text = "NO ZONE SET"
+        returnNowBtn.BackgroundColor3 = Color3.fromRGB(140, 30, 30)
+        task.delay(1.5, function()
+            returnNowBtn.Text = "RETURN TO ZONE NOW"
+            returnNowBtn.BackgroundColor3 = Color3.fromRGB(80, 40, 120)
+        end)
+        return
+    end
+    local pos = getZoneTP(savedReturnZoneId)
+    if pos then
+        if doTeleport(pos) then
+            returnNowBtn.Text = "RETURNED!"
+            returnNowBtn.BackgroundColor3 = Color3.fromRGB(0, 120, 0)
+            task.delay(1.5, function()
+                returnNowBtn.Text = "RETURN TO ZONE NOW"
+                returnNowBtn.BackgroundColor3 = Color3.fromRGB(80, 40, 120)
+            end)
+        end
+    else
+        returnNowBtn.Text = "ZONE NOT FOUND"
+        returnNowBtn.BackgroundColor3 = Color3.fromRGB(140, 30, 30)
+        task.delay(1.5, function()
+            returnNowBtn.Text = "RETURN TO ZONE NOW"
+            returnNowBtn.BackgroundColor3 = Color3.fromRGB(80, 40, 120)
+        end)
+    end
+end)
+
+-- ===== MAIN LOOP =====
+
+task.spawn(function()
+    while true do
+        task.wait(2)
+        local ok, state = pcall(function() return stateSource() end)
+        if not ok or not state then
+            status.Text = "Could not read UFO state."
+            continue
+        end
+
+        local curZone = getPlayerZoneId()
+        if curZone then
+            local zn = "?"
+            pcall(function() if Zones.hasZone(curZone) then zn = Zones.getZone(curZone).name end end)
+            zoneInfo.Text = "Current zone: " .. zn
+        else
+            zoneInfo.Text = "Current zone: unknown"
+        end
+
+        if savedReturnZoneId then
+            local rn = "?"
+            pcall(function() if Zones.hasZone(savedReturnZoneId) then rn = Zones.getZone(savedReturnZoneId).name end end)
+            returnInfo.Text = "Return zone: " .. rn
+        else
+            returnInfo.Text = "Return zone: none"
+        end
+
+        if not isAutoTPEnabled then
+            status.Text = "Auto-TP OFF."
+            continue
+        end
+
+        local isIdle = (state.phase == "idle")
+
+        if not isIdle and wasIdle then
+            local cz = getPlayerZoneId()
+            if cz then
+                savedReturnZoneId = cz
+                local zn = "?"
+                pcall(function() if Zones.hasZone(cz) then zn = Zones.getZone(cz).name end end)
+                print("[WilkY's Auto UFO] Saved return: " .. zn)
+            end
+            lastTeleportedZoneId = nil
+        end
+
+        if isIdle and not wasIdle then
+            if savedReturnZoneId then
+                local rpos = getZoneTP(savedReturnZoneId)
+                if rpos then
+                    task.delay(3, function()
+                        if doTeleport(rpos) then
+                            local zn = "?"
+                            pcall(function() if Zones.hasZone(savedReturnZoneId) then zn = Zones.getZone(savedReturnZoneId).name end end)
+                            print("[WilkY's Auto UFO] Returned to " .. zn)
+                        end
+                    end)
+                    status.Text = "Event ended. Returning in 3s..."
+                end
+            end
+            lastTeleportedZoneId = nil
+        end
+
+        wasIdle = isIdle
+
+        if isIdle then
+            if state.nextEventStartTime then
+                local rem = math.max(0, state.nextEventStartTime - os.time())
+                status.Text = "Next UFO in " .. math.floor(rem / 60) .. "m " .. (rem % 60) .. "s"
+            else
+                status.Text = "Waiting for server..."
+            end
+        else
+            local zId = state.zoneId
+            local zn = "?"
+            pcall(function() if zId and Zones.hasZone(zId) then zn = Zones.getZone(zId).name end end)
+            local target = nil
+            if state.hoverPosition then
+                target = state.hoverPosition + Vector3.new(0, 5, 0)
+            elseif zId then
+                target = getZoneTP(zId)
+            end
+
+            if target and zId ~= lastTeleportedZoneId then
+                if doTeleport(target) then
+                    lastTeleportedZoneId = zId
+                    status.Text = "Teleported to " .. zn .. " [" .. state.phase .. "]"
+                else
+                    status.Text = "TP failed - check character."
+                end
+            elseif target and zId == lastTeleportedZoneId then
+                status.Text = zn .. " [" .. state.phase .. "]"
+            else
+                status.Text = zn .. " [" .. state.phase .. "] (no pos)"
+            end
+        end
+    end
+end)
+
+print("[WilkY's Auto UFO v1.1] Loaded.")
+print("Drag: anywhere on panel | Resize: bottom-right corner | Minimize: -")
