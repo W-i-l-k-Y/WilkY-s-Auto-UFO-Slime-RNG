@@ -8,8 +8,19 @@ local RS = game:GetService("ReplicatedStorage")
 local UIS = game:GetService("UserInputService")
 local player = Players.LocalPlayer
 
+-- Set global require for Xeno compatibility
+-- Xeno blocks direct require() on ModuleScripts, but we can cache the original
+-- require into getgenv() so our safeRequire can access it later
+do
+    local gv = getgenv and getgenv()
+    if gv and not gv.require then
+        gv.require = require
+    end
+end
+
 -- Safe require that works on both Potassium and Xeno executors
 local function safeRequire(mod)
+    if mod == nil then return nil end
     local ok, res = pcall(require, mod)
     if ok then return res end
     local gv = getgenv and getgenv()
@@ -31,6 +42,19 @@ local zonesModule = itemsFolder:FindFirstChild("Zones")
 
 local UfoEventServiceClient = safeRequire(ufoClientModule)
 local Zones = safeRequire(zonesModule)
+
+if not UfoEventServiceClient then
+    warn("[WilkY's Auto UFO] ERROR: Could not load UfoEventServiceClient module.")
+    warn("This executor may not support ModuleScript requiring.")
+    warn("Try a different executor or contact the script author.")
+    return
+end
+
+if not Zones then
+    warn("[WilkY's Auto UFO] ERROR: Could not load Zones module.")
+    return
+end
+
 local stateSource = UfoEventServiceClient:getStateSource()
 
 local isAutoTPEnabled = true
@@ -356,6 +380,9 @@ task.spawn(function()
 end)
 
 print([[
+
+
+
 
 
               d8, d8b  d8b                                                                           ,d8888b   
