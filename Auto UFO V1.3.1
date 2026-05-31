@@ -15,14 +15,16 @@ d88  d8P' d8P'88P?88    888bd8P' d88   88  ?8b,       d8P' ?88  d88   88 88P d8P
                                        ,d8P                                                                    
                                     `?888P'                                                                    v1.3]])
 
+
 --[[
     WilkY's Auto UFO v1.3
-    UFO Auto-TP + Return Zone + Loot Tracker + Font Size + Settings Tab
+    + keepwilkyufo : persists settings across reconnects
 ]]
 
 local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
 local UIS = game:GetService("UserInputService")
+local TS = game:GetService("TeleportService")
 local player = Players.LocalPlayer
 
 local src = RS:WaitForChild("Source")
@@ -34,6 +36,56 @@ local zonesMod = src:WaitForChild("Game"):WaitForChild("Items"):WaitForChild("Zo
 local UfoEventServiceClient = require(ufoCli)
 local Zones = require(zonesMod)
 local stateSource = UfoEventServiceClient:getStateSource()
+
+-- ===== KEEPIY: Persist settings across reconnects =====
+local gv = getgenv and getgenv()
+if not gv then
+    warn("[WilkY] getgenv not available - keepiy disabled")
+end
+
+-- Settings that persist across reconnects
+local function saveSettings()
+    if not gv then return end
+    gv.WilkY_UFO = gv.WilkY_UFO or {}
+    gv.WilkY_UFO.savedReturnZoneId = savedReturnZoneId
+    gv.WilkY_UFO.currentFontSize = currentFontSize
+    gv.WilkY_UFO.panelSize = panel and panel.Size or UDim2.new(0,290,0,260)
+    gv.WilkY_UFO.panelPos = panel and panel.Position or UDim2.new(0,12,0.5,-130)
+    gv.WilkY_UFO.lootHistory = lootHistory
+    gv.WilkY_UFO.lootStats = lootStats
+end
+
+local function loadSettings()
+    if not gv or not gv.WilkY_UFO then return end
+    local s = gv.WilkY_UFO
+    if s.savedReturnZoneId then savedReturnZoneId = s.savedReturnZoneId end
+    if s.currentFontSize then currentFontSize = s.currentFontSize end
+    if s.lootHistory then lootHistory = s.lootHistory end
+    if s.lootStats then lootStats = s.lootStats end
+    -- Panel size/pos will be applied after GUI is created
+    return s
+end
+
+-- Hook into teleport events for reconnection persistence
+local function setupKeepiy()
+    if not gv then return end
+    
+    -- Mark that keepiy is active
+    gv.WilkY_UFO_Keepiy = true
+    
+    -- OnTeleport fires when the player is about to teleport (including reconnects)
+    player.OnTeleport:Connect(function(state)
+        if state == Enum.TeleportState.Started or state == Enum.TeleportState.InProgress then
+            saveSettings()
+        end
+    end)
+    
+    -- TeleportInitFailed fires when a teleport fails (server down, etc.)
+    TS.TeleportInitFailed:Connect(function(teleportResult, errorMessage)
+        saveSettings()
+    end)
+end
+
 local isAutoTPEnabled = true
 local lastTeleportedZoneId = nil
 local savedReturnZoneId = nil
@@ -44,6 +96,15 @@ local currentTab = "main"
 local lootHistory = {}
 local lootStats = {food=0, boost=0, fruit=0, specialDice=0, total=0}
 local allTextLabels = {}
+
+-- Load persisted settings before GUI creation
+local persisted = gv and gv.WilkY_UFO
+if persisted then
+    if persisted.savedReturnZoneId then savedReturnZoneId = persisted.savedReturnZoneId end
+    if persisted.currentFontSize then currentFontSize = persisted.currentFontSize end
+    if persisted.lootHistory then lootHistory = persisted.lootHistory end
+    if persisted.lootStats then lootStats = persisted.lootStats end
+end
 
 local lootCliMod = feat:FindFirstChild("Loot")
 local LootServiceClient = nil
@@ -72,6 +133,7 @@ if lootCliMod then
                     lootStats.total = lootStats.total + 1
                     if lootStats[en.kind] then lootStats[en.kind] = lootStats[en.kind] + 1 end
                     if currentTab == "loot" then refreshLootHistory() end
+                    saveSettings()
                 end
                 return result
             end
@@ -150,7 +212,16 @@ for _, n in ipairs({"WilkYsAutoUFO","UFO_AutoTP_Odds","UfoAutoTP"}) do
 end
 
 local gui = Instance.new("ScreenGui") gui.Name = "WilkYsAutoUFO" gui.ResetOnSpawn = false gui.Parent = player.PlayerGui
-local panel = Instance.new("Frame") panel.Size = UDim2.new(0,290,0,260) panel.Position = UDim2.new(0,12,0.5,-130) panel.BackgroundColor3 = Color3.fromRGB(18,18,28) panel.BorderSizePixel = 0 panel.Active = true panel.ClipsDescendants = true panel.Parent = gui Instance.new("UICorner",panel).CornerRadius=UDim.new(0,10)
+local panel = Instance.new("Frame")
+-- Apply persisted size/pos if available
+if persisted and persisted.panelSize then
+    panel.Size = persisted.panelSize
+    panel.Position = persisted.panelPos or UDim2.new(0,12,0.5,-130)
+else
+    panel.Size = UDim2.new(0,290,0,260)
+    panel.Position = UDim2.new(0,12,0.5,-130)
+end
+panel.BackgroundColor3 = Color3.fromRGB(18,18,28) panel.BorderSizePixel = 0 panel.Active = true panel.ClipsDescendants = true panel.Parent = gui Instance.new("UICorner",panel).CornerRadius=UDim.new(0,10)
 local accent = Instance.new("Frame") accent.Size=UDim2.new(1,0,0,3) accent.BackgroundColor3=Color3.fromRGB(255,200,50) accent.BorderSizePixel=0 accent.Parent=panel Instance.new("UICorner",accent).CornerRadius=UDim.new(0,2)
 local topBar = Instance.new("Frame") topBar.Size=UDim2.new(1,0,0,30) topBar.BackgroundColor3=Color3.fromRGB(28,28,42) topBar.BorderSizePixel=0 topBar.ZIndex=30 topBar.Parent=panel
 local titleLbl = Instance.new("TextLabel") titleLbl.Size=UDim2.new(1,-80,1,0) titleLbl.Position=UDim2.new(0,8,0,0) titleLbl.BackgroundTransparency=1 titleLbl.Text="WilkY Auto UFO" titleLbl.TextColor3=Color3.fromRGB(255,210,60) titleLbl.Font=Enum.Font.GothamBold titleLbl.TextXAlignment=Enum.TextXAlignment.Left titleLbl.ZIndex=31 titleLbl.Parent=topBar trackFont(titleLbl,13)
@@ -203,7 +274,7 @@ function refreshLootHistory()
     end
     tl.Text="Total: "..lootStats.total fl.Text="Food: "..lootStats.food bl.Text="Boost: "..lootStats.boost frl.Text="Fruit: "..lootStats.fruit dl.Text="Dice: "..lootStats.specialDice
 end
-clb.MouseButton1Click:Connect(function() lootHistory={} lootStats={food=0,boost=0,fruit=0,specialDice=0,total=0} refreshLootHistory() end)
+clb.MouseButton1Click:Connect(function() lootHistory={} lootStats={food=0,boost=0,fruit=0,specialDice=0,total=0} refreshLootHistory() saveSettings() end)
 
 local credTab2=Instance.new("Frame") credTab2.Size=UDim2.new(1,0,1,-28) credTab2.BackgroundTransparency=1 credTab2.Visible=false credTab2.Parent=contentArea
 local cs=Instance.new("ScrollingFrame") cs.Size=UDim2.new(1,4,1,0) cs.BackgroundTransparency=1 cs.BorderSizePixel=0 cs.ScrollBarThickness=3 cs.ScrollBarImageColor3=Color3.fromRGB(70,70,110) cs.AutomaticCanvasSize=Enum.AutomaticSize.Y cs.CanvasSize=UDim2.new(0,0,0,0) cs.Parent=credTab2
@@ -221,12 +292,12 @@ aLn("Auto-TP + per-zone tracking",ci2,Color3.fromRGB(180,220,180)); ci2=ci2+1
 aLn("Loot history + stats",ci2,Color3.fromRGB(180,220,180)); ci2=ci2+1
 aLn("Font size slider",ci2,Color3.fromRGB(180,220,180)); ci2=ci2+1
 aLn("Panel resize (handle + presets)",ci2,Color3.fromRGB(180,220,180)); ci2=ci2+1
-aLn("Fully draggable",ci2,Color3.fromRGB(180,220,180)); ci2=ci2+1
+aLn("Fully draggable + keepiy",ci2,Color3.fromRGB(180,220,180)); ci2=ci2+1
 aSep(ci2); ci2=ci2+1
-aHdr("SETTINGS TAB",ci2); ci2=ci2+1
-aLn("Font size: +/- with live preview",ci2,Color3.fromRGB(160,200,160)); ci2=ci2+1
-aLn("Panel size: 4 presets + custom +/-",ci2,Color3.fromRGB(160,200,160)); ci2=ci2+1
-aLn("Clear history + reset all",ci2,Color3.fromRGB(160,200,160)); ci2=ci2+1
+aHdr("KEEPIY (RECONNECT)",ci2); ci2=ci2+1
+aLn("Settings persist across reconnects",ci2,Color3.fromRGB(160,200,160)); ci2=ci2+1
+aLn("Return zone, font size, panel size/pos",ci2,Color3.fromRGB(160,200,160)); ci2=ci2+1
+aLn("Loot history all saved automatically",ci2,Color3.fromRGB(160,200,160)); ci2=ci2+1
 aSep(ci2); ci2=ci2+1
 aHdr("LOADSTRING",ci2); ci2=ci2+1
 aLn("loadstring(game:HttpGet(URL))()",ci2,Color3.fromRGB(255,220,120)); ci2=ci2+1
@@ -236,7 +307,7 @@ aLn("Scripted by: WilkY",ci2,Color3.fromRGB(255,200,100)); ci2=ci2+1
 aLn("Built with: OWL / IYAI",ci2,Color3.fromRGB(160,160,200)); ci2=ci2+1
 aSep(ci2); ci2=ci2+1
 aHdr("CHANGELOG",ci2); ci2=ci2+1
-aLn("v1.3 -- Font size + Settings tab",ci2,Color3.fromRGB(200,180,140)); ci2=ci2+1
+aLn("v1.3 -- Font size + Settings + keepiy",ci2,Color3.fromRGB(200,180,140)); ci2=ci2+1
 aLn("v1.2 -- Loot tracker",ci2,Color3.fromRGB(150,150,150)); ci2=ci2+1
 aLn("v1.1 -- Resize + full drag",ci2,Color3.fromRGB(150,150,150)); ci2=ci2+1
 aLn("v1.0 -- Initial release",ci2,Color3.fromRGB(150,150,150)); ci2=ci2+1
@@ -253,8 +324,8 @@ local fLbl=Instance.new("TextLabel") fLbl.Size=UDim2.new(0.25,0,1,0) fLbl.Positi
 local fmB=Instance.new("TextButton") fmB.Size=UDim2.new(0,26,0,22) fmB.Position=UDim2.new(0.3,2,0,3) fmB.BackgroundColor3=Color3.fromRGB(60,30,30) fmB.Text="-" fmB.TextColor3=Color3.fromRGB(255,150,150) fmB.Font=Enum.Font.GothamBold fmB.BorderSizePixel=0 fmB.ZIndex=15 fmB.TextSize=14 fmB.Parent=fontRow Instance.new("UICorner",fmB).CornerRadius=UDim.new(0,4)
 local fpB=Instance.new("TextButton") fpB.Size=UDim2.new(0,26,0,22) fpB.Position=UDim2.new(0.3,32,0,3) fpB.BackgroundColor3=Color3.fromRGB(30,60,30) fpB.Text="+" fpB.TextColor3=Color3.fromRGB(150,255,150) fpB.Font=Enum.Font.GothamBold fpB.BorderSizePixel=0 fpB.ZIndex=15 fpB.TextSize=14 fpB.Parent=fontRow Instance.new("UICorner",fpB).CornerRadius=UDim.new(0,4)
 local fPrev=Instance.new("TextLabel") fPrev.Size=UDim2.new(0.35,0,1,0) fPrev.Position=UDim2.new(0.65,0,0,0) fPrev.BackgroundTransparency=1 fPrev.Text="AaBb123" fPrev.TextColor3=Color3.fromRGB(200,200,255) fPrev.Font=Enum.Font.GothamBold fPrev.TextXAlignment=Enum.TextXAlignment.Right fPrev.TextSize=10 fPrev.Parent=fontRow
-fmB.MouseButton1Click:Connect(function() currentFontSize=math.max(6,currentFontSize-1) fLbl.Text="Size: "..currentFontSize fPrev.TextSize=currentFontSize applyFontSize() end)
-fpB.MouseButton1Click:Connect(function() currentFontSize=math.min(24,currentFontSize+1) fLbl.Text="Size: "..currentFontSize fPrev.TextSize=currentFontSize applyFontSize() end)
+fmB.MouseButton1Click:Connect(function() currentFontSize=math.max(6,currentFontSize-1) fLbl.Text="Size: "..currentFontSize fPrev.TextSize=currentFontSize applyFontSize() saveSettings() end)
+fpB.MouseButton1Click:Connect(function() currentFontSize=math.min(24,currentFontSize+1) fLbl.Text="Size: "..currentFontSize fPrev.TextSize=currentFontSize applyFontSize() saveSettings() end)
 si2=si2+1
 local sepF=Instance.new("Frame") sepF.Size=UDim2.new(1,0,0,6) sepF.BackgroundTransparency=1 sepF.LayoutOrder=si2 sepF.Parent=ss si2=si2+1
 aShdr2("PANEL SIZE PRESETS",si2); si2=si2+1
@@ -264,7 +335,7 @@ for _,p in ipairs(pres) do
     local row=Instance.new("Frame") row.Size=UDim2.new(1,0,0,26) row.BackgroundTransparency=1 row.LayoutOrder=si2 row.Parent=ss
     local l=Instance.new("TextLabel") l.Size=UDim2.new(0.6,-4,1,0) l.Position=UDim2.new(0,6,0,0) l.BackgroundTransparency=1 l.Text=p.l l.TextColor3=Color3.fromRGB(180,180,200) l.Font=Enum.Font.Gotham l.TextXAlignment=Enum.TextXAlignment.Left l.Parent=row trackFont(l,10)
     local b=Instance.new("TextButton") b.Size=UDim2.new(0.3,-4,0,20) b.Position=UDim2.new(0.65,2,0,3) b.BackgroundColor3=Color3.fromRGB(40,50,80) b.Text="Apply" b.TextColor3=Color3.fromRGB(180,200,255) b.Font=Enum.Font.GothamBold b.BorderSizePixel=0 b.ZIndex=15 b.TextSize=9 b.Parent=row Instance.new("UICorner",b).CornerRadius=UDim.new(0,4)
-    b.MouseButton1Click:Connect(function() panel.Size=UDim2.new(0,p.w,0,p.h) contentArea.Size=UDim2.new(1,-8,1,-62) sd.Text="Size: "..p.w.." x "..p.h end) si2=si2+1
+    b.MouseButton1Click:Connect(function() panel.Size=UDim2.new(0,p.w,0,p.h) contentArea.Size=UDim2.new(1,-8,1,-62) sd.Text="Size: "..p.w.." x "..p.h saveSettings() end) si2=si2+1
 end
 local sep2=Instance.new("Frame") sep2.Size=UDim2.new(1,0,0,6) sep2.BackgroundTransparency=1 sep2.LayoutOrder=si2 sep2.Parent=ss si2=si2+1
 aShdr2("CUSTOM RESIZE",si2); si2=si2+1
@@ -278,17 +349,21 @@ local hLbl=Instance.new("TextLabel") hLbl.Size=UDim2.new(0.35,0,1,0) hLbl.Positi
 local hmB=Instance.new("TextButton") hmB.Size=UDim2.new(0,22,0,20) hmB.Position=UDim2.new(0.4,2,0,3) hmB.BackgroundColor3=Color3.fromRGB(60,30,30) hmB.Text="-" hmB.TextColor3=Color3.fromRGB(255,150,150) hmB.Font=Enum.Font.GothamBold hmB.BorderSizePixel=0 hmB.ZIndex=15 hmB.TextSize=12 hmB.Parent=hRow Instance.new("UICorner",hmB).CornerRadius=UDim.new(0,4)
 local hpB=Instance.new("TextButton") hpB.Size=UDim2.new(0,22,0,20) hpB.Position=UDim2.new(0.4,28,0,3) hpB.BackgroundColor3=Color3.fromRGB(30,60,30) hpB.Text="+" hpB.TextColor3=Color3.fromRGB(150,255,150) hpB.Font=Enum.Font.GothamBold hpB.BorderSizePixel=0 hpB.ZIndex=15 hpB.TextSize=12 hpB.Parent=hRow Instance.new("UICorner",hpB).CornerRadius=UDim.new(0,4)
 si2=si2+1
-wmB.MouseButton1Click:Connect(function() local w=math.max(200,panel.Size.X.Offset-10) panel.Size=UDim2.new(0,w,0,panel.Size.Y.Offset) wLbl.Text="Width: "..w sd.Text="Size: "..w.." x "..panel.Size.Y.Offset end)
-wpB.MouseButton1Click:Connect(function() local w=math.min(600,panel.Size.X.Offset+10) panel.Size=UDim2.new(0,w,0,panel.Size.Y.Offset) wLbl.Text="Width: "..w sd.Text="Size: "..w.." x "..panel.Size.Y.Offset end)
-hmB.MouseButton1Click:Connect(function() local h=math.max(160,panel.Size.Y.Offset-10) panel.Size=UDim2.new(0,panel.Size.X.Offset,0,h) hLbl.Text="Height: "..h sd.Text="Size: "..panel.Size.X.Offset.." x "..h end)
-hpB.MouseButton1Click:Connect(function() local h=math.min(600,panel.Size.Y.Offset+10) panel.Size=UDim2.new(0,panel.Size.X.Offset,0,h) hLbl.Text="Height: "..h sd.Text="Size: "..panel.Size.X.Offset.." x "..h end)
+wmB.MouseButton1Click:Connect(function() local w=math.max(200,panel.Size.X.Offset-10) panel.Size=UDim2.new(0,w,0,panel.Size.Y.Offset) wLbl.Text="Width: "..w sd.Text="Size: "..w.." x "..panel.Size.Y.Offset saveSettings() end)
+wpB.MouseButton1Click:Connect(function() local w=math.min(600,panel.Size.X.Offset+10) panel.Size=UDim2.new(0,w,0,panel.Size.Y.Offset) wLbl.Text="Width: "..w sd.Text="Size: "..w.." x "..panel.Size.Y.Offset saveSettings() end)
+hmB.MouseButton1Click:Connect(function() local h=math.max(160,panel.Size.Y.Offset-10) panel.Size=UDim2.new(0,panel.Size.X.Offset,0,h) hLbl.Text="Height: "..h sd.Text="Size: "..panel.Size.X.Offset.." x "..h saveSettings() end)
+hpB.MouseButton1Click:Connect(function() local h=math.min(600,panel.Size.Y.Offset+10) panel.Size=UDim2.new(0,panel.Size.X.Offset,0,h) hLbl.Text="Height: "..h sd.Text="Size: "..panel.Size.X.Offset.." x "..h saveSettings() end)
 local sep3=Instance.new("Frame") sep3.Size=UDim2.new(1,0,0,6) sep3.BackgroundTransparency=1 sep3.LayoutOrder=si2 sep3.Parent=ss si2=si2+1
 aShdr2("DATA",si2); si2=si2+1
 local cdb=Instance.new("TextButton") cdb.Size=UDim2.new(1,-8,0,24) cdb.BackgroundColor3=Color3.fromRGB(50,25,25) cdb.Text="Clear Loot History" cdb.TextColor3=Color3.fromRGB(255,150,150) cdb.Font=Enum.Font.GothamBold cdb.BorderSizePixel=0 cdb.ZIndex=15 cdb.TextSize=9 cdb.LayoutOrder=si2 cdb.Parent=ss Instance.new("UICorner",cdb).CornerRadius=UDim.new(0,5)
-cdb.MouseButton1Click:Connect(function() lootHistory={} lootStats={food=0,boost=0,fruit=0,specialDice=0,total=0} refreshLootHistory() end) si2=si2+1
+cdb.MouseButton1Click:Connect(function() lootHistory={} lootStats={food=0,boost=0,fruit=0,specialDice=0,total=0} refreshLootHistory() saveSettings() end) si2=si2+1
 local rab=Instance.new("TextButton") rab.Size=UDim2.new(1,-8,0,24) rab.BackgroundColor3=Color3.fromRGB(25,25,50) rab.Text="Reset All Settings" rab.TextColor3=Color3.fromRGB(180,180,255) rab.Font=Enum.Font.GothamBold rab.BorderSizePixel=0 rab.ZIndex=15 rab.TextSize=9 rab.LayoutOrder=si2 rab.Parent=ss Instance.new("UICorner",rab).CornerRadius=UDim.new(0,5)
-rab.MouseButton1Click:Connect(function() currentFontSize=10 panel.Size=UDim2.new(0,290,0,260) contentArea.Size=UDim2.new(1,-8,1,-62) fLbl.Text="Size: 10" fPrev.TextSize=10 wLbl.Text="Width: 290" hLbl.Text="Height: 260" sd.Text="Size: 290 x 260" applyFontSize() end)
+rab.MouseButton1Click:Connect(function() currentFontSize=10 panel.Size=UDim2.new(0,290,0,260) contentArea.Size=UDim2.new(1,-8,1,-62) fLbl.Text="Size: 10" fPrev.TextSize=10 wLbl.Text="Width: 290" hLbl.Text="Height: 260" sd.Text="Size: 290 x 260" applyFontSize() saveSettings() end)
 
+-- ===== KEEPIY: Setup teleport hooks =====
+setupKeepiy()
+
+-- ===== TAB SWITCHING =====
 local function switchTab(t)
     currentTab=t
     mainTab.Visible=false lootTab2.Visible=false credTab2.Visible=false settTab.Visible=false
@@ -310,23 +385,23 @@ tabSettBtn.MouseButton1Click:Connect(function() if currentTab=="settings" then s
 settingsBtn.MouseButton1Click:Connect(function() if currentTab=="settings" then switchTab("main") else switchTab("settings") end end)
 
 local minimized=false local savedSize=panel.Size
-minBtn.MouseButton1Click:Connect(function() minimized=not minimized if minimized then savedSize=panel.Size panel.Size=UDim2.new(0,290,0,33) minBtn.Text="+" contentArea.Visible=false tabBar.Visible=false else panel.Size=savedSize minBtn.Text="-" contentArea.Visible=true tabBar.Visible=true end end)
+minBtn.MouseButton1Click:Connect(function() minimized=not minimized if minimized then savedSize=panel.Size panel.Size=UDim2.new(0,290,0,33) minBtn.Text="+" contentArea.Visible=false tabBar.Visible=false else panel.Size=savedSize minBtn.Text="-" contentArea.Visible=true tabBar.Visible=true end saveSettings() end)
 
 local resizer=Instance.new("TextButton") resizer.Size=UDim2.new(0,16,0,16) resizer.Position=UDim2.new(1,-18,1,-18) resizer.BackgroundColor3=Color3.fromRGB(60,60,90) resizer.Text="" resizer.BorderSizePixel=0 resizer.ZIndex=50 resizer.Parent=panel Instance.new("UICorner",resizer).CornerRadius=UDim.new(0,4)
 local resizing,resizeStart,startSize
 resizer.InputBegan:Connect(function(input) if input.UserInputType==Enum.UserInputType.MouseButton1 or input.UserInputType==Enum.UserInputType.Touch then resizing=true resizeStart=input.Position startSize=panel.Size end end)
-UIS.InputChanged:Connect(function(input) if resizing and (input.UserInputType==Enum.UserInputType.MouseMovement or input.UserInputType==Enum.UserInputType.Touch) then local d=input.Position-resizeStart local nw=math.clamp(startSize.X.Offset+d.X,200,600) local nh=math.clamp(startSize.Y.Offset+d.Y,160,600) panel.Size=UDim2.new(0,nw,0,nh) wLbl.Text="Width: "..nw hLbl.Text="Height: "..nh sd.Text="Size: "..nw.." x "..nh end end)
+UIS.InputChanged:Connect(function(input) if resizing and (input.UserInputType==Enum.UserInputType.MouseMovement or input.UserInputType==Enum.UserInputType.Touch) then local d=input.Position-resizeStart local nw=math.clamp(startSize.X.Offset+d.X,200,600) local nh=math.clamp(startSize.Y.Offset+d.Y,160,600) panel.Size=UDim2.new(0,nw,0,nh) wLbl.Text="Width: "..nw hLbl.Text="Height: "..nh sd.Text="Size: "..nw.." x "..nh saveSettings() end end)
 UIS.InputEnded:Connect(function(input) if input.UserInputType==Enum.UserInputType.MouseButton1 or input.UserInputType==Enum.UserInputType.Touch then resizing=false end end)
 
 local dragging,dragStartPos,startPanelPos
 topBar.InputBegan:Connect(function(input) if (input.UserInputType==Enum.UserInputType.MouseButton1 or input.UserInputType==Enum.UserInputType.Touch) and not resizing then dragging=true dragStartPos=input.Position startPanelPos=panel.Position end end)
 panel.InputBegan:Connect(function(input) if (input.UserInputType==Enum.UserInputType.MouseButton1 or input.UserInputType==Enum.UserInputType.Touch) and not resizing then dragging=true dragStartPos=input.Position startPanelPos=panel.Position end end)
 contentArea.InputBegan:Connect(function(input) if (input.UserInputType==Enum.UserInputType.MouseButton1 or input.UserInputType==Enum.UserInputType.Touch) and not resizing then dragging=true dragStartPos=input.Position startPanelPos=panel.Position end end)
-UIS.InputChanged:Connect(function(input) if dragging and not resizing and (input.UserInputType==Enum.UserInputType.MouseMovement or input.UserInputType==Enum.UserInputType.Touch) then local d=input.Position-dragStartPos panel.Position=UDim2.new(startPanelPos.X.Scale,startPanelPos.X.Offset+d.X,startPanelPos.Y.Scale,startPanelPos.Y.Offset+d.Y) end end)
+UIS.InputChanged:Connect(function(input) if dragging and not resizing and (input.UserInputType==Enum.UserInputType.MouseMovement or input.UserInputType==Enum.UserInputType.Touch) then local d=input.Position-dragStartPos panel.Position=UDim2.new(startPanelPos.X.Scale,startPanelPos.X.Offset+d.X,startPanelPos.Y.Scale,startPanelPos.Y.Offset+d.Y) saveSettings() end end)
 UIS.InputEnded:Connect(function(input) if input.UserInputType==Enum.UserInputType.MouseButton1 or input.UserInputType==Enum.UserInputType.Touch then dragging=false end end)
 
 tpBtn2.MouseButton1Click:Connect(function() isAutoTPEnabled=not isAutoTPEnabled if isAutoTPEnabled then tpBtn2.BackgroundColor3=Color3.fromRGB(0,170,0) tpBtn2.Text="AUTO-TP: ON" else tpBtn2.BackgroundColor3=Color3.fromRGB(180,0,0) tpBtn2.Text="AUTO-TP: OFF" end end)
-setRetBtn.MouseButton1Click:Connect(function() local cz=getPlayerZoneId() if cz then savedReturnZoneId=cz local zn="?" pcall(function() if Zones.hasZone(cz) then zn=Zones.getZone(cz).name end end) setRetBtn.Text="ZONE SET" setRetBtn.BackgroundColor3=Color3.fromRGB(0,120,0) status.Text="Saved: "..zn task.delay(1.5,function() setRetBtn.Text="SET ZONE" setRetBtn.BackgroundColor3=Color3.fromRGB(30,60,140) end) else setRetBtn.Text="NO ZONE" setRetBtn.BackgroundColor3=Color3.fromRGB(140,30,30) status.Text="Cannot detect zone." task.delay(1.5,function() setRetBtn.Text="SET ZONE" setRetBtn.BackgroundColor3=Color3.fromRGB(30,60,140) end) end end)
+setRetBtn.MouseButton1Click:Connect(function() local cz=getPlayerZoneId() if cz then savedReturnZoneId=cz local zn="?" pcall(function() if Zones.hasZone(cz) then zn=Zones.getZone(cz).name end end) setRetBtn.Text="ZONE SET" setRetBtn.BackgroundColor3=Color3.fromRGB(0,120,0) status.Text="Saved: "..zn task.delay(1.5,function() setRetBtn.Text="SET ZONE" setRetBtn.BackgroundColor3=Color3.fromRGB(30,60,140) end) saveSettings() else setRetBtn.Text="NO ZONE" setRetBtn.BackgroundColor3=Color3.fromRGB(140,30,30) status.Text="Cannot detect zone." task.delay(1.5,function() setRetBtn.Text="SET ZONE" setRetBtn.BackgroundColor3=Color3.fromRGB(30,60,140) end) end end)
 retNowBtn.MouseButton1Click:Connect(function() if not savedReturnZoneId then retNowBtn.Text="NO ZONE" retNowBtn.BackgroundColor3=Color3.fromRGB(140,30,30) task.delay(1.5,function() retNowBtn.Text="RETURN NOW" retNowBtn.BackgroundColor3=Color3.fromRGB(80,40,120) end) return end local pos=getZoneTP(savedReturnZoneId) if pos then if doTeleport(pos) then retNowBtn.Text="RETURNED!" retNowBtn.BackgroundColor3=Color3.fromRGB(0,120,0) task.delay(1.5,function() retNowBtn.Text="RETURN NOW" retNowBtn.BackgroundColor3=Color3.fromRGB(80,40,120) end) end else retNowBtn.Text="NOT FOUND" retNowBtn.BackgroundColor3=Color3.fromRGB(140,30,30) task.delay(1.5,function() retNowBtn.Text="RETURN NOW" retNowBtn.BackgroundColor3=Color3.fromRGB(80,40,120) end) end end)
 
 task.spawn(function()
